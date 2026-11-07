@@ -19,6 +19,8 @@ import java.util.*;
 public class Match {
     public SoccerPitch pitch;
     public Ball ball;
+    private final PlayerStrategy chaseStrategy = new ChaseBallStrategy();
+    private final PlayerStrategy dribbleStrategy = new DribbleStrategy();
 
     // Main Arrays
     private ArrayList<Actor> gameActors;
@@ -225,15 +227,21 @@ public class Match {
                         updateGoalkeeper(p, ballY);
                     } else if (owner == null) {
                         if (p == homeChaser || p == awayChaser) {
-                            moveToward(p, ballX, ballY, 2);
+                            chaseStrategy.move(p, ballX, ballY, 2);
                         } else {
                             // Everyone else shuffles with the play but keeps formation
                             moveIntoShape(p, ballX, ballY);
                         }
                     } else if (p == owner) {
-                        // The player in possession dribbles toward the opposing goal
+                        // Select the dribbling strategy when the player has possession.
                         int direction = isHome(p) ? 1 : -1;
-                        moveToward(p, p.getX() + (direction * 25), p.getY(), 1);
+
+                        dribbleStrategy.move(
+                            p,
+                            p.getX() + (direction * 25),
+                            p.getY(),
+                            1
+                        );
                     } else if (p == presser) {
                         moveToward(p, owner.getX(), owner.getY(), 2);
                     } else {
@@ -456,18 +464,9 @@ public class Match {
         return Math.max(min, Math.min(max, value));
     }
 
-    private void moveToward(Player p, int targetX, int targetY, int speed) {
-        if (p.getX() < targetX) {
-            p.moveRight(Math.min(speed, targetX - p.getX()));
-        } else if (p.getX() > targetX) {
-            p.moveLeft(Math.min(speed, p.getX() - targetX));
-        }
-
-        if (p.getY() < targetY) {
-            p.moveDown(Math.min(speed, targetY - p.getY()));
-        } else if (p.getY() > targetY) {
-            p.moveUp(Math.min(speed, p.getY() - targetY));
-        }
+    private void moveToward(Player p, int targetX,
+                            int targetY, int speed) {
+        PlayerMovement.moveToward(p, targetX, targetY, speed);
     }
 
     // Players move with the play without abandoning their original positions
