@@ -512,6 +512,23 @@ public class Match {
         return p.getName().startsWith("Home_");
     }
 
+
+    /**
+     * Selects a team's tactical mode using the current score.
+     */
+
+    private TacticalMode getTacticalMode(Player player) {
+        int teamScore = isHome(player) ? homeScore : awayScore;
+        int opponentScore = isHome(player) ? awayScore : homeScore;
+
+        return TacticalDecision.selectMode(
+            teamScore,
+            opponentScore
+        );
+    }
+        
+
+
     private int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -531,6 +548,23 @@ public class Match {
 
         int targetX = clamp(p.getHomeX() + xShift, 20, ScreenSize.width - 20);
         int targetY = clamp(p.getHomeY() + yShift, 20, ScreenSize.height - 20);
+
+
+        // Adapt formation according to the current match score.
+        TacticalMode mode = getTacticalMode(p);
+
+        int tacticalShift = TacticalDecision.horizontalShift(
+            mode,
+            isHome(p)
+        );
+
+        // Apply tactical positioning without leaving the pitch.
+        targetX = clamp(
+            targetX + tacticalShift,
+            20,
+            ScreenSize.width - 20
+        );
+
 
         // Nearby players move slowly into supporting positions around the ball
         // The influence fades with distance, so the whole team does not swarm it
