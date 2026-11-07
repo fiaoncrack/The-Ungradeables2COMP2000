@@ -24,6 +24,21 @@ public class Match {
     private final PlayerStrategy pressingStrategy = new PressingStrategy();
     private final PlayerStrategy goalkeeperStrategy = new GoalkeeperStrategy();
 
+    private static final int ANALYTICS_INTERVAL_TICKS = 100;
+
+    private int analyticsTickCounter = 0;
+
+    private volatile double averagePlayerDistanceFromBall = 0.0;
+
+    /**
+     * Most recently calculated average distance of players
+     * from the ball, measured in screen pixels.
+     */
+    public double getAveragePlayerDistanceFromBall() {
+        return averagePlayerDistanceFromBall;
+    }
+
+
     // Main Arrays
     private ArrayList<Actor> gameActors;
     private ArrayList<Player> players;
@@ -77,6 +92,8 @@ public class Match {
         goalPauseTicks = 0;
         pitch.setScore(homeScore, awayScore);
         pitch.setMatchMessage("");
+        analyticsTickCounter = 0;
+        averagePlayerDistanceFromBall = 0.0;   
 
         // summon ball in centre
         ball = new Ball(null);
@@ -319,6 +336,29 @@ public class Match {
                     rememberKicker(passer);
                     ticksUntilPass = 50 + random.nextInt(70);
                 }
+            }
+
+            // Periodically calculate match analytics using immutable snapshots.
+            // Gameplay updates remain sequential to avoid race conditions.
+            analyticsTickCounter++;
+
+            if (analyticsTickCounter >= ANALYTICS_INTERVAL_TICKS) {
+                analyticsTickCounter = 0;
+
+                // Capture player and ball coordinates on the simulation thread.
+                java.util.List<MatchAnalytics.Position> snapshot =
+                        MatchAnalytics.snapshotPlayers(players);
+
+                int snapshotBallX = ball.getX();
+                int snapshotBallY = ball.getY();
+
+                // Parallel workers only read the copied coordinates.
+                averagePlayerDistanceFromBall =
+                        MatchAnalytics.averageDistanceParallel(
+                                snapshot,
+                                snapshotBallX,
+                                snapshotBallY
+                        );
             }
 
             // push updated positions to the pitch so it redraws
