@@ -21,6 +21,7 @@ public class Match {
     public Ball ball;
     private final PlayerStrategy chaseStrategy = new ChaseBallStrategy();
     private final PlayerStrategy dribbleStrategy = new DribbleStrategy();
+    private final PlayerStrategy pressingStrategy = new PressingStrategy();
 
     // Main Arrays
     private ArrayList<Actor> gameActors;
@@ -243,7 +244,12 @@ public class Match {
                             1
                         );
                     } else if (p == presser) {
-                        moveToward(p, owner.getX(), owner.getY(), 2);
+                        pressingStrategy.move(
+                            p,
+                            owner.getX(),
+                            owner.getY(),
+                            2
+                        );
                     } else {
                         // Everyone else shuffles with the play but keeps formation
                         moveIntoShape(p, ballX, ballY);
