@@ -19,6 +19,25 @@ import java.util.*;
 public class Match {
     public SoccerPitch pitch;
     public Ball ball;
+    private final PlayerStrategy chaseStrategy = new ChaseBallStrategy();
+    private final PlayerStrategy dribbleStrategy = new DribbleStrategy();
+    private final PlayerStrategy pressingStrategy = new PressingStrategy();
+    private final PlayerStrategy goalkeeperStrategy = new GoalkeeperStrategy();
+
+    private static final int ANALYTICS_INTERVAL_TICKS = 100;
+
+    private int analyticsTickCounter = 0;
+
+    private volatile double averagePlayerDistanceFromBall = 0.0;
+
+    /**
+     * Most recently calculated average distance of players
+     * from the ball, measured in screen pixels.
+     */
+    public double getAveragePlayerDistanceFromBall() {
+        return averagePlayerDistanceFromBall;
+    }
+
 
     // Main Arrays
     private ArrayList<Actor> gameActors;
@@ -73,6 +92,8 @@ public class Match {
         goalPauseTicks = 0;
         pitch.setScore(homeScore, awayScore);
         pitch.setMatchMessage("");
+        analyticsTickCounter = 0;
+        averagePlayerDistanceFromBall = 0.0;   
 
         // summon ball in centre
         ball = new Ball(null);
@@ -222,20 +243,36 @@ public class Match {
                         // A player who has just lost the ball cannot instantly steal it back
                         continue;
                     } else if (p.isGoalkeeper()) {
-                        updateGoalkeeper(p, ballY);
+                        goalkeeperStrategy.move(
+                            p,
+                            p.getHomeX(),
+                            ballY,
+                            1
+                        );
                     } else if (owner == null) {
                         if (p == homeChaser || p == awayChaser) {
-                            moveToward(p, ballX, ballY, 2);
+                            chaseStrategy.move(p, ballX, ballY, 2);
                         } else {
                             // Everyone else shuffles with the play but keeps formation
                             moveIntoShape(p, ballX, ballY);
                         }
                     } else if (p == owner) {
-                        // The player in possession dribbles toward the opposing goal
+                        // Select the dribbling strategy when the player has possession.
                         int direction = isHome(p) ? 1 : -1;
-                        moveToward(p, p.getX() + (direction * 25), p.getY(), 1);
+
+                        dribbleStrategy.move(
+                            p,
+                            p.getX() + (direction * 25),
+                            p.getY(),
+                            1
+                        );
                     } else if (p == presser) {
-                        moveToward(p, owner.getX(), owner.getY(), 2);
+                        pressingStrategy.move(
+                            p,
+                            owner.getX(),
+                            owner.getY(),
+                            2
+                        );
                     } else {
                         // Everyone else shuffles with the play but keeps formation
                         moveIntoShape(p, ballX, ballY);
@@ -299,6 +336,29 @@ public class Match {
                     rememberKicker(passer);
                     ticksUntilPass = 50 + random.nextInt(70);
                 }
+            }
+
+            // Periodically calculate match analytics using immutable snapshots.
+            // Gameplay updates remain sequential to avoid race conditions.
+            analyticsTickCounter++;
+
+            if (analyticsTickCounter >= ANALYTICS_INTERVAL_TICKS) {
+                analyticsTickCounter = 0;
+
+                // Capture player and ball coordinates on the simulation thread.
+                java.util.List<MatchAnalytics.Position> snapshot =
+                        MatchAnalytics.snapshotPlayers(players);
+
+                int snapshotBallX = ball.getX();
+                int snapshotBallY = ball.getY();
+
+                // Parallel workers only read the copied coordinates.
+                averagePlayerDistanceFromBall =
+                        MatchAnalytics.averageDistanceParallel(
+                                snapshot,
+                                snapshotBallX,
+                                snapshotBallY
+                        );
             }
 
             // push updated positions to the pitch so it redraws
@@ -452,22 +512,30 @@ public class Match {
         return p.getName().startsWith("Home_");
     }
 
+
+    /**
+     * Selects a team's tactical mode using the current score.
+     */
+
+    private TacticalMode getTacticalMode(Player player) {
+        int teamScore = isHome(player) ? homeScore : awayScore;
+        int opponentScore = isHome(player) ? awayScore : homeScore;
+
+        return TacticalDecision.selectMode(
+            teamScore,
+            opponentScore
+        );
+    }
+        
+
+
     private int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
 
-    private void moveToward(Player p, int targetX, int targetY, int speed) {
-        if (p.getX() < targetX) {
-            p.moveRight(Math.min(speed, targetX - p.getX()));
-        } else if (p.getX() > targetX) {
-            p.moveLeft(Math.min(speed, p.getX() - targetX));
-        }
-
-        if (p.getY() < targetY) {
-            p.moveDown(Math.min(speed, targetY - p.getY()));
-        } else if (p.getY() > targetY) {
-            p.moveUp(Math.min(speed, p.getY() - targetY));
-        }
+    private void moveToward(Player p, int targetX,
+                            int targetY, int speed) {
+        PlayerMovement.moveToward(p, targetX, targetY, speed);
     }
 
     // Players move with the play without abandoning their original positions
@@ -480,6 +548,23 @@ public class Match {
 
         int targetX = clamp(p.getHomeX() + xShift, 20, ScreenSize.width - 20);
         int targetY = clamp(p.getHomeY() + yShift, 20, ScreenSize.height - 20);
+
+
+        // Adapt formation according to the current match score.
+        TacticalMode mode = getTacticalMode(p);
+
+        int tacticalShift = TacticalDecision.horizontalShift(
+            mode,
+            isHome(p)
+        );
+
+        // Apply tactical positioning without leaving the pitch.
+        targetX = clamp(
+            targetX + tacticalShift,
+            20,
+            ScreenSize.width - 20
+        );
+
 
         // Nearby players move slowly into supporting positions around the ball
         // The influence fades with distance, so the whole team does not swarm it
@@ -508,46 +593,61 @@ public class Match {
         moveToward(p, targetX, targetY, 1);
     }
 
-    private Player findClosestPlayer(boolean homeTeam, int targetX, int targetY) {
-        Player closest = null;
-        double closestDistance = Double.MAX_VALUE;
 
-        for (Player p : players) {
-            if (p.isGoalkeeper() || isStunned(p) || isHome(p) != homeTeam) {
-                continue;
-            }
+    private Player findClosestPlayer(
+            boolean homeTeam,
+            int targetX,
+            int targetY) {
 
-            double distance = distanceBetween(p.getX(), p.getY(), targetX, targetY);
-
-            if (distance < closestDistance) {
-                closestDistance = distance;
-                closest = p;
-            }
-        }
-
-        return closest;
+        return players.stream()
+                .filter(p -> !p.isGoalkeeper())
+                .filter(p -> !isStunned(p))
+                .filter(p -> isHome(p) == homeTeam)
+                .min(java.util.Comparator.comparingDouble(
+                        p -> distanceBetween(
+                                p.getX(),
+                                p.getY(),
+                                targetX,
+                                targetY
+                        )
+                ))
+                .orElse(null);
     }
+
+
 
     private Player findClosestOpponent(Player owner) {
-        Player closest = null;
-        double closestDistance = Double.MAX_VALUE;
-        boolean ownerIsHome = isHome(owner);
 
-        for (Player p : players) {
-            if (p.isGoalkeeper() || isStunned(p) || isHome(p) == ownerIsHome) {
-                continue;
-            }
-
-            double distance = distanceBetween(p.getX(), p.getY(), owner.getX(), owner.getY());
-
-            if (distance < closestDistance) {
-                closestDistance = distance;
-                closest = p;
-            }
+        if (owner == null) {
+            return null;
         }
 
-        return closest;
+        boolean ownerIsHome = isHome(owner);
+
+        return players.stream()
+                // Exclude goalkeepers.
+                .filter(p -> !p.isGoalkeeper())
+
+                // Exclude temporarily stunned players.
+                .filter(p -> !isStunned(p))
+
+                // Only consider players from the opposing team.
+                .filter(p -> isHome(p) != ownerIsHome)
+
+                // Select the opponent closest to the ball carrier.
+                .min(java.util.Comparator.comparingDouble(
+                        p -> distanceBetween(
+                                p.getX(),
+                                p.getY(),
+                                owner.getX(),
+                                owner.getY()
+                        )
+                ))
+
+                // Return null if no eligible opponent exists.
+                .orElse(null);
     }
+
 
     private Player findPlayerTouchingBall(int pickupRadius) {
         Player closest = null;
@@ -657,18 +757,6 @@ public class Match {
         return true;
     }
 
-    // Goalkeepers only track the ball vertically, and stay clamped inside their box
-    private void updateGoalkeeper(Player gk, int ballY) {
-        if (gk.getY() < ballY) gk.moveDown(1);
-        if (gk.getY() > ballY) gk.moveUp(1);
-
-        int margin = 15; // keeps them off the very edge of the box
-        int minY = (ScreenSize.height - SoccerPitch.PENALTY_HEIGHT) / 2 + margin;
-        int maxY = minY + SoccerPitch.PENALTY_HEIGHT - (margin * 2);
-
-        if (gk.getY() < minY) gk.moveDown(minY - gk.getY());
-        if (gk.getY() > maxY) gk.moveUp(gk.getY() - maxY);
-    }
 
     private void resolvePlayerCollisions() {
         int minDistance = 20; // slightly more than ~18px draw diameter, so they touch but don't overlap
