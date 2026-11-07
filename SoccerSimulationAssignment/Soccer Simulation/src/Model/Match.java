@@ -519,46 +519,61 @@ public class Match {
         moveToward(p, targetX, targetY, 1);
     }
 
-    private Player findClosestPlayer(boolean homeTeam, int targetX, int targetY) {
-        Player closest = null;
-        double closestDistance = Double.MAX_VALUE;
 
-        for (Player p : players) {
-            if (p.isGoalkeeper() || isStunned(p) || isHome(p) != homeTeam) {
-                continue;
-            }
+    private Player findClosestPlayer(
+            boolean homeTeam,
+            int targetX,
+            int targetY) {
 
-            double distance = distanceBetween(p.getX(), p.getY(), targetX, targetY);
-
-            if (distance < closestDistance) {
-                closestDistance = distance;
-                closest = p;
-            }
-        }
-
-        return closest;
+        return players.stream()
+                .filter(p -> !p.isGoalkeeper())
+                .filter(p -> !isStunned(p))
+                .filter(p -> isHome(p) == homeTeam)
+                .min(java.util.Comparator.comparingDouble(
+                        p -> distanceBetween(
+                                p.getX(),
+                                p.getY(),
+                                targetX,
+                                targetY
+                        )
+                ))
+                .orElse(null);
     }
+
+
 
     private Player findClosestOpponent(Player owner) {
-        Player closest = null;
-        double closestDistance = Double.MAX_VALUE;
-        boolean ownerIsHome = isHome(owner);
 
-        for (Player p : players) {
-            if (p.isGoalkeeper() || isStunned(p) || isHome(p) == ownerIsHome) {
-                continue;
-            }
-
-            double distance = distanceBetween(p.getX(), p.getY(), owner.getX(), owner.getY());
-
-            if (distance < closestDistance) {
-                closestDistance = distance;
-                closest = p;
-            }
+        if (owner == null) {
+            return null;
         }
 
-        return closest;
+        boolean ownerIsHome = isHome(owner);
+
+        return players.stream()
+                // Exclude goalkeepers.
+                .filter(p -> !p.isGoalkeeper())
+
+                // Exclude temporarily stunned players.
+                .filter(p -> !isStunned(p))
+
+                // Only consider players from the opposing team.
+                .filter(p -> isHome(p) != ownerIsHome)
+
+                // Select the opponent closest to the ball carrier.
+                .min(java.util.Comparator.comparingDouble(
+                        p -> distanceBetween(
+                                p.getX(),
+                                p.getY(),
+                                owner.getX(),
+                                owner.getY()
+                        )
+                ))
+
+                // Return null if no eligible opponent exists.
+                .orElse(null);
     }
+
 
     private Player findPlayerTouchingBall(int pickupRadius) {
         Player closest = null;
