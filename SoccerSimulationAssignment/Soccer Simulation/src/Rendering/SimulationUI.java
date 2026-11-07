@@ -493,7 +493,7 @@ NEEDS:
  
          menuButton.setBounds(ScreenSize.width / 5 - 125, ScreenSize.height - 385, 80, 40);
          
-         TimerPanel timerPanel = new TimerPanel();
+         TimerPanel timerPanel = new TimerPanel(match);
          timerPanel.setBounds(ScreenSize.width / 2 - 75, 20, 150, 40);
  
          match.pitch.setBounds(0, 0, ScreenSize.width, ScreenSize.height);

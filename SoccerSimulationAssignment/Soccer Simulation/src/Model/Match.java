@@ -714,8 +714,25 @@ public class Match {
     // Called by TimerPanel when the match clock reaches 00:00
     public void finishMatch() {
         stopSimulation();
+
+        String result;
+
+        if (homeScore > awayScore) {
+            result = "HOME TEAM WINS!";
+        } else if (awayScore > homeScore) {
+            result = "AWAY TEAM WINS!";
+        } else {
+            result = "IT'S A DRAW!";
+        }
+
         pitch.setScore(homeScore, awayScore);
-        pitch.setMatchMessage("FULL TIME: HOME " + homeScore + " - " + awayScore + " AWAY");
+
+        pitch.setMatchMessage(
+            "FULL TIME | HOME " + homeScore
+            + " - " + awayScore
+            + " AWAY | " + result
+        );
+
         pitch.setActors(gameActors);
     }
 
