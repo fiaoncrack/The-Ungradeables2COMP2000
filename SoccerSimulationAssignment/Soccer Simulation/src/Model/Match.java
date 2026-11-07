@@ -22,6 +22,7 @@ public class Match {
     private final PlayerStrategy chaseStrategy = new ChaseBallStrategy();
     private final PlayerStrategy dribbleStrategy = new DribbleStrategy();
     private final PlayerStrategy pressingStrategy = new PressingStrategy();
+    private final PlayerStrategy goalkeeperStrategy = new GoalkeeperStrategy();
 
     // Main Arrays
     private ArrayList<Actor> gameActors;
@@ -225,7 +226,12 @@ public class Match {
                         // A player who has just lost the ball cannot instantly steal it back
                         continue;
                     } else if (p.isGoalkeeper()) {
-                        updateGoalkeeper(p, ballY);
+                        goalkeeperStrategy.move(
+                            p,
+                            p.getHomeX(),
+                            ballY,
+                            1
+                        );
                     } else if (owner == null) {
                         if (p == homeChaser || p == awayChaser) {
                             chaseStrategy.move(p, ballX, ballY, 2);
@@ -662,18 +668,6 @@ public class Match {
         return true;
     }
 
-    // Goalkeepers only track the ball vertically, and stay clamped inside their box
-    private void updateGoalkeeper(Player gk, int ballY) {
-        if (gk.getY() < ballY) gk.moveDown(1);
-        if (gk.getY() > ballY) gk.moveUp(1);
-
-        int margin = 15; // keeps them off the very edge of the box
-        int minY = (ScreenSize.height - SoccerPitch.PENALTY_HEIGHT) / 2 + margin;
-        int maxY = minY + SoccerPitch.PENALTY_HEIGHT - (margin * 2);
-
-        if (gk.getY() < minY) gk.moveDown(minY - gk.getY());
-        if (gk.getY() > maxY) gk.moveUp(gk.getY() - maxY);
-    }
 
     private void resolvePlayerCollisions() {
         int minDistance = 20; // slightly more than ~18px draw diameter, so they touch but don't overlap
